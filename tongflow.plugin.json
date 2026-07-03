@@ -1,0 +1,45 @@
+{
+    "env": [
+        {
+            "key": "ARK_API_KEY",
+            "required": true,
+            "description": "Volcengine Ark API key (Seedance)",
+            "url": "https://console.volcengine.com/ark"
+        },
+        {
+            "key": "SEEDANCE_MODEL",
+            "default": "doubao-seedance-2-0-mini-260615",
+            "description": "Seedance model id (full model required for 1080p/4K)"
+        },
+        {
+            "key": "SEEDANCE_RESOLUTION",
+            "default": "720p",
+            "description": "480p / 720p, up to 4k on the full model"
+        },
+        {
+            "key": "SEEDANCE_RATIO",
+            "default": "adaptive",
+            "description": "Fallback aspect ratio when the node has no explicit size"
+        },
+        {
+            "key": "SEEDANCE_GENERATE_AUDIO",
+            "default": "true",
+            "description": "Generate audio with the video"
+        },
+        {
+            "key": "SEEDANCE_WATERMARK",
+            "default": "false",
+            "description": "Add a watermark"
+        },
+        {
+            "key": "SEEDANCE_BASE_URL",
+            "default": "https://ark.cn-beijing.volces.com/api/v3",
+            "description": "Override the Ark endpoint"
+        },
+        {
+            "key": "SEEDANCE_POLL_TIMEOUT_S",
+            "default": "600",
+            "description": "Max seconds to wait for a generation"
+        }
+    ]
+}

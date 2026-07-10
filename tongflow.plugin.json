@@ -1,4 +1,9 @@
 {
+    "plugin": {
+        "name": "Doubao Seedance",
+        "description": "Text-to-video, image-to-video, and first/last-frame video via Volcengine Ark (ByteDance Doubao Seedance 2.0).",
+        "icon": "/plugins/tongflow-api-bytedance.svg"
+    },
     "env": [
         {
             "key": "ARK_API_KEY",

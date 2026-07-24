@@ -28,6 +28,16 @@ from tongflow.models.images_gen_video import (
     ImagesGenVideoOutput,
 )
 
+# Slots this plugin is the default implementation of: the node picker lists
+# it first and a newly added node preselects it. Read statically by the
+# scanner (never executed), so any SDK version imports this file fine.
+TONGFLOW_DEFAULT_SLOTS = [
+    "text-gen-video",
+    "image-gen-video",
+    "image-image-gen-video",
+    "images-gen-video",
+]
+
 # Plugin logs go to stderr — stdout is reserved for the ABI JSON response.
 # Level can be tuned via `TONGFLOW_PLUGIN_LOG_LEVEL` (default INFO).
 logging.basicConfig(

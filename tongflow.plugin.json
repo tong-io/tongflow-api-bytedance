@@ -1,7 +1,7 @@
 {
     "plugin": {
-        "name": "Doubao Seedance",
-        "description": "Text-to-video, image-to-video, and first/last-frame video via Volcengine Ark (ByteDance Doubao Seedance 2.0).",
+        "name": "Doubao (ByteDance)",
+        "description": "ByteDance Volcengine Ark: text & vision (Doubao), image (Seedream) and video (Seedance) with a per-node model picker.",
         "icon": "/plugins/tongflow-api-bytedance.svg"
     },
     "env": [
@@ -13,8 +13,7 @@
         },
         {
             "key": "SEEDANCE_MODEL",
-            "default": "doubao-seedance-2-0-mini-260615",
-            "description": "Seedance model id (full model required for 1080p/4K)"
+            "description": "Optional: force a Seedance video model id (advanced; the per-node picker is the normal way; full model required for 1080p/4K)"
         },
         {
             "key": "SEEDANCE_RESOLUTION",

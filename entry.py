@@ -50,27 +50,26 @@ from tongflow.llm_batch_handlers import arrange_group_output, drop_video_output
 # release. A user may also paste an `ep-...` endpoint id, which is passed through
 # unchanged. ASR / TTS live on Volcengine's separate speech service (different
 # key + transport) and are intentionally out of scope here.
-_SEEDANCE = ["doubao-seedance-2-0-mini-260615", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"]
-_LLM = ["doubao-seed-1-6-250615", "doubao-seed-2-0-pro-260215", "doubao-seed-1-6-flash-250615", "doubao-1-5-pro-32k", "doubao-1-5-lite-32k"]
-_VLM = ["doubao-seed-1-6-250615", "doubao-seed-1-6-vision-250815", "doubao-seed-2-0-pro-260215", "doubao-1-5-vision-pro-32k"]
-_SEEDREAM = ["doubao-seedream-4-0-250828", "doubao-seedream-4-5-251128", "doubao-seedream-5-0-260128"]
-
+# NOTE: the scanner reads this by AST without importing the module, so every
+# value MUST be a pure list-of-string literal — no variable references, no
+# shared aliases. The repetition below is intentional (Doubao LLM / Doubao
+# vision / Seedream / Seedance families).
 TONGFLOW_SLOT_MODELS = {
-    "gen-text": _LLM,
-    "split-text": _LLM,
-    "combine-text": _LLM,
-    "image-gen-text": _VLM,
-    "image-describe": _VLM,
-    "video-gen-text": _VLM,
-    "video-describe": _VLM,
-    "image-gen": _SEEDREAM,
-    "image-edit": _SEEDREAM,
-    "image-fusion": _SEEDREAM,
-    "text-gen-video": _SEEDANCE,
-    "image-gen-video": _SEEDANCE,
-    "image-image-gen-video": _SEEDANCE,
-    "audio-image-gen-video": _SEEDANCE,
-    "images-gen-video": _SEEDANCE,
+    "gen-text": ["doubao-seed-1-6-250615", "doubao-seed-2-0-pro-260215", "doubao-seed-1-6-flash-250615", "doubao-1-5-pro-32k", "doubao-1-5-lite-32k"],
+    "split-text": ["doubao-seed-1-6-250615", "doubao-seed-2-0-pro-260215", "doubao-seed-1-6-flash-250615", "doubao-1-5-pro-32k", "doubao-1-5-lite-32k"],
+    "combine-text": ["doubao-seed-1-6-250615", "doubao-seed-2-0-pro-260215", "doubao-seed-1-6-flash-250615", "doubao-1-5-pro-32k", "doubao-1-5-lite-32k"],
+    "image-gen-text": ["doubao-seed-1-6-250615", "doubao-seed-1-6-vision-250815", "doubao-seed-2-0-pro-260215", "doubao-1-5-vision-pro-32k"],
+    "image-describe": ["doubao-seed-1-6-250615", "doubao-seed-1-6-vision-250815", "doubao-seed-2-0-pro-260215", "doubao-1-5-vision-pro-32k"],
+    "video-gen-text": ["doubao-seed-1-6-250615", "doubao-seed-1-6-vision-250815", "doubao-seed-2-0-pro-260215", "doubao-1-5-vision-pro-32k"],
+    "video-describe": ["doubao-seed-1-6-250615", "doubao-seed-1-6-vision-250815", "doubao-seed-2-0-pro-260215", "doubao-1-5-vision-pro-32k"],
+    "image-gen": ["doubao-seedream-4-0-250828", "doubao-seedream-4-5-251128", "doubao-seedream-5-0-260128"],
+    "image-edit": ["doubao-seedream-4-0-250828", "doubao-seedream-4-5-251128", "doubao-seedream-5-0-260128"],
+    "image-fusion": ["doubao-seedream-4-0-250828", "doubao-seedream-4-5-251128", "doubao-seedream-5-0-260128"],
+    "text-gen-video": ["doubao-seedance-2-0-mini-260615", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"],
+    "image-gen-video": ["doubao-seedance-2-0-mini-260615", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"],
+    "image-image-gen-video": ["doubao-seedance-2-0-mini-260615", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"],
+    "audio-image-gen-video": ["doubao-seedance-2-0-mini-260615", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"],
+    "images-gen-video": ["doubao-seedance-2-0-mini-260615", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"],
 }
 
 # Slots this plugin is the default implementation of.

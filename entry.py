@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import math
@@ -13,6 +14,16 @@ from urllib.request import Request, urlopen
 from tongflow.node_slots import NodeSlots
 from tongflow.protocol import Asset, asset
 from tongflow.slots import node_slot
+from tongflow.models.gen_text import GenTextInput, GenTextOutput
+from tongflow.models.split_text import SplitTextInput, SplitTextOutput
+from tongflow.models.combine_text import CombineTextInput, CombineTextOutput
+from tongflow.models.image_gen_text import ImageGenTextInput, ImageGenTextOutput
+from tongflow.models.image_describe import ImageDescribeInput, ImageDescribeOutput
+from tongflow.models.video_gen_text import VideoGenTextInput, VideoGenTextOutput
+from tongflow.models.video_describe import VideoDescribeInput, VideoDescribeOutput
+from tongflow.models.image_gen import ImageGenInput, ImageGenOutput
+from tongflow.models.image_edit import ImageEditInput, ImageEditOutput
+from tongflow.models.image_fusion import ImageFusionInput, ImageFusionOutput
 from tongflow.models.text_gen_video import TextGenVideoInput, TextGenVideoOutput
 from tongflow.models.image_gen_video import ImageGenVideoInput, ImageGenVideoOutput
 from tongflow.models.image_image_gen_video import (
@@ -27,10 +38,42 @@ from tongflow.models.images_gen_video import (
     ImagesGenVideoInput,
     ImagesGenVideoOutput,
 )
+from tongflow.models.drop_video import DropVideoInput, DropVideoOutput
+from tongflow.models.arrange_group import ArrangeGroupInput, ArrangeGroupOutput
+from tongflow.llm_batch_handlers import arrange_group_output, drop_video_output
 
-# Slots this plugin is the default implementation of: the node picker lists
-# it first and a newly added node preselects it. Read statically by the
-# scanner (never executed), so any SDK version imports this file fine.
+
+# ── Per-node model picker ───────────────────────────────────────────────────
+# Pure dict literal read by the platform scanner via AST. First entry = default.
+# Model ids verified 2026-07; Ark dated snapshots (-25xxxx/-26xxxx) rotate and
+# each must be enabled on the account — re-check the live Ark model list before
+# release. A user may also paste an `ep-...` endpoint id, which is passed through
+# unchanged. ASR / TTS live on Volcengine's separate speech service (different
+# key + transport) and are intentionally out of scope here.
+_SEEDANCE = ["doubao-seedance-2-0-mini-260615", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"]
+_LLM = ["doubao-seed-1-6-250615", "doubao-seed-2-0-pro-260215", "doubao-seed-1-6-flash-250615", "doubao-1-5-pro-32k", "doubao-1-5-lite-32k"]
+_VLM = ["doubao-seed-1-6-250615", "doubao-seed-1-6-vision-250815", "doubao-seed-2-0-pro-260215", "doubao-1-5-vision-pro-32k"]
+_SEEDREAM = ["doubao-seedream-4-0-250828", "doubao-seedream-4-5-251128", "doubao-seedream-5-0-260128"]
+
+TONGFLOW_SLOT_MODELS = {
+    "gen-text": _LLM,
+    "split-text": _LLM,
+    "combine-text": _LLM,
+    "image-gen-text": _VLM,
+    "image-describe": _VLM,
+    "video-gen-text": _VLM,
+    "video-describe": _VLM,
+    "image-gen": _SEEDREAM,
+    "image-edit": _SEEDREAM,
+    "image-fusion": _SEEDREAM,
+    "text-gen-video": _SEEDANCE,
+    "image-gen-video": _SEEDANCE,
+    "image-image-gen-video": _SEEDANCE,
+    "audio-image-gen-video": _SEEDANCE,
+    "images-gen-video": _SEEDANCE,
+}
+
+# Slots this plugin is the default implementation of.
 TONGFLOW_DEFAULT_SLOTS = [
     "text-gen-video",
     "image-gen-video",
@@ -38,8 +81,10 @@ TONGFLOW_DEFAULT_SLOTS = [
     "images-gen-video",
 ]
 
+# Set from the request envelope's top-level `model` field in main().
+_REQUEST_MODEL: str = ""
+
 # Plugin logs go to stderr — stdout is reserved for the ABI JSON response.
-# Level can be tuned via `TONGFLOW_PLUGIN_LOG_LEVEL` (default INFO).
 logging.basicConfig(
     level=os.environ.get("TONGFLOW_PLUGIN_LOG_LEVEL", "INFO").upper(),
     stream=sys.stderr,
@@ -48,9 +93,6 @@ logging.basicConfig(
 log = logging.getLogger("tongflow.plugins.bytedance")
 
 
-# Volcengine Ark (Doubao Seedance 2.0). The model is a plugin-internal knob,
-# not an ABI field — overridable via env. Default to the lowest-cost tier.
-DEFAULT_MODEL = "doubao-seedance-2-0-mini-260615"
 DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_RESOLUTION = "720p"  # Mini supports only 480p / 720p
 DEFAULT_RATIO = "adaptive"
@@ -59,13 +101,29 @@ POLL_INTERVAL_S = 10.0
 
 # Ark ratio buckets (width / height) used to snap an explicit width×height.
 _RATIOS: Dict[str, float] = {
-    "21:9": 21 / 9,
-    "16:9": 16 / 9,
-    "4:3": 4 / 3,
-    "1:1": 1.0,
-    "3:4": 3 / 4,
-    "9:16": 9 / 16,
+    "21:9": 21 / 9, "16:9": 16 / 9, "4:3": 4 / 3, "1:1": 1.0, "3:4": 3 / 4, "9:16": 9 / 16,
 }
+
+
+def _env(name: str) -> str:
+    return (os.environ.get(name) or "").strip()
+
+
+def _active_model(slot: str, env_override: str = "") -> str:
+    """Resolve the model for a slot: per-node pick > legacy env override >
+    list default. An `ep-...` endpoint id is accepted verbatim."""
+    models = TONGFLOW_SLOT_MODELS[slot]
+    if _REQUEST_MODEL:
+        if _REQUEST_MODEL.startswith("ep-"):
+            return _REQUEST_MODEL
+        if _REQUEST_MODEL not in models:
+            raise RuntimeError(
+                f"unknown model {_REQUEST_MODEL!r} for {slot}; available: {', '.join(models)}"
+            )
+        return _REQUEST_MODEL
+    if env_override:
+        return env_override
+    return models[0]
 
 
 def _require_api_key() -> str:
@@ -78,27 +136,23 @@ def _require_api_key() -> str:
     return api_key
 
 
-def _resolve_model() -> str:
-    return (os.environ.get("SEEDANCE_MODEL") or "").strip() or DEFAULT_MODEL
-
-
 def _base_url() -> str:
-    return (os.environ.get("SEEDANCE_BASE_URL") or "").strip() or DEFAULT_BASE_URL
+    return _env("SEEDANCE_BASE_URL") or DEFAULT_BASE_URL
 
 
 def _resolution() -> str:
-    return (os.environ.get("SEEDANCE_RESOLUTION") or "").strip() or DEFAULT_RESOLUTION
+    return _env("SEEDANCE_RESOLUTION") or DEFAULT_RESOLUTION
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    raw = (os.environ.get(name) or "").strip().lower()
+    raw = _env(name).lower()
     if not raw:
         return default
     return raw in {"1", "true", "yes", "on"}
 
 
 def _poll_timeout() -> float:
-    raw = (os.environ.get("SEEDANCE_POLL_TIMEOUT_S") or "").strip()
+    raw = _env("SEEDANCE_POLL_TIMEOUT_S")
     try:
         return float(raw) if raw else DEFAULT_POLL_TIMEOUT_S
     except ValueError:
@@ -106,19 +160,13 @@ def _poll_timeout() -> float:
 
 
 def _ratio_from_wh(width: int | None, height: int | None) -> str:
-    """Snap an explicit width×height to the nearest Ark ratio bucket.
-
-    Falls back to ``SEEDANCE_RATIO`` (default ``adaptive``) when either side is
-    missing.
-    """
     if not width or not height or height <= 0:
-        return (os.environ.get("SEEDANCE_RATIO") or "").strip() or DEFAULT_RATIO
+        return _env("SEEDANCE_RATIO") or DEFAULT_RATIO
     target = width / height
     return min(_RATIOS, key=lambda r: abs(_RATIOS[r] - target))
 
 
 def _data_url(a: Asset, *, default_mime: str) -> str:
-    """Build a base64 data URL for an Asset (Ark accepts these for image/audio)."""
     mime = (a.mime or default_mime).strip() or default_mime
     return f"data:{mime};base64,{a.bytesBase64}"
 
@@ -126,7 +174,7 @@ def _data_url(a: Asset, *, default_mime: str) -> str:
 # ── Ark HTTP helpers ───────────────────────────────────────────────────────
 
 
-def _request(method: str, path: str, body: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def _request(method: str, path: str, body: Dict[str, Any] | None = None, *, timeout: int = 180) -> Dict[str, Any]:
     url = _base_url().rstrip("/") + path
     data = json.dumps(body).encode("utf-8") if body is not None else None
     headers = {
@@ -136,7 +184,7 @@ def _request(method: str, path: str, body: Dict[str, Any] | None = None) -> Dict
     log.info("%s %s", method, path)
     req = Request(url, data=data, headers=headers, method=method)
     try:
-        resp = urlopen(req, timeout=180)  # noqa: S310
+        resp = urlopen(req, timeout=timeout)  # noqa: S310
     except HTTPError as e:
         err_body = ""
         try:
@@ -146,15 +194,82 @@ def _request(method: str, path: str, body: Dict[str, Any] | None = None) -> Dict
         log.error("HTTP %s on %s\nresponse body: %s", e.code, path, err_body)
         raise RuntimeError(f"HTTP {e.code} from Ark: {err_body or e.reason}") from e
     except URLError as e:
-        log.error("network error contacting %s: %s", path, e.reason)
         raise RuntimeError(f"Network error: {e.reason}") from e
     raw = resp.read().decode("utf-8", errors="replace")
     return json.loads(raw) if raw.strip() else {}
 
 
-def _create_task(content: List[Dict[str, Any]], **top_params: Any) -> str:
+def _download(url: str) -> bytes:
+    try:
+        resp = urlopen(url, timeout=180)  # noqa: S310
+    except HTTPError as e:
+        raise RuntimeError(f"HTTP {e.code} downloading media: {e.reason}") from e
+    except URLError as e:
+        raise RuntimeError(f"Network error downloading media: {e.reason}") from e
+    return resp.read()
+
+
+# ── Doubao chat (LLM + vision) ─────────────────────────────────────────────
+
+
+def _chat(*, model: str, messages: List[Dict[str, Any]], json_mode: bool = False) -> str:
+    body: Dict[str, Any] = {"model": model, "messages": messages}
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    obj = _request("POST", "/chat/completions", body)
+    choices = obj.get("choices") or []
+    if not choices:
+        raise RuntimeError("Ark chat response missing choices")
+    content = ((choices[0] or {}).get("message") or {}).get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("Ark chat response missing message.content")
+    return content.strip()
+
+
+def _chat_text(*, model: str, user_message: str, json_mode: bool = False) -> str:
+    return _chat(
+        model=model,
+        messages=[
+            {"role": "system", "content": "You are a versatile assistant. Follow the user's instructions strictly and respond in the same language as the user."},
+            {"role": "user", "content": user_message},
+        ],
+        json_mode=json_mode,
+    )
+
+
+# ── Seedream image (/images/generations) ────────────────────────────────────
+
+
+def _generate_image(*, model: str, prompt: str, images: List[Asset]) -> Asset:
+    body: Dict[str, Any] = {"model": model, "prompt": prompt}
+    size = _env("SEEDANCE_IMAGE_SIZE")
+    if size:
+        body["size"] = size
+    if len(images) == 1:
+        body["image"] = _data_url(images[0], default_mime="image/png")
+    elif len(images) > 1:
+        body["image"] = [_data_url(i, default_mime="image/png") for i in images]
+        body["sequential_image_generation"] = "disabled"
+    obj = _request("POST", "/images/generations", body, timeout=300)
+    data = obj.get("data") or []
+    if not data:
+        raise RuntimeError(f"Ark image response missing data: {obj}")
+    item = data[0] or {}
+    b64 = item.get("b64_json")
+    if isinstance(b64, str) and b64:
+        return asset(base64.b64decode(b64), mime="image/png")
+    url = item.get("url")
+    if isinstance(url, str) and url:
+        return asset(_download(url), mime="image/png")
+    raise RuntimeError("Ark image response missing url/b64_json")
+
+
+# ── Seedance video (async task) ─────────────────────────────────────────────
+
+
+def _create_task(model: str, content: List[Dict[str, Any]], **top_params: Any) -> str:
     body: Dict[str, Any] = {
-        "model": _resolve_model(),
+        "model": model,
         "content": content,
         "generate_audio": _env_bool("SEEDANCE_GENERATE_AUDIO", True),
         "resolution": _resolution(),
@@ -171,7 +286,6 @@ def _create_task(content: List[Dict[str, Any]], **top_params: Any) -> str:
 
 
 def _poll_task(task_id: str) -> str:
-    """Poll until succeeded, then return the video URL."""
     deadline = time.monotonic() + _poll_timeout()
     while True:
         obj = _request("GET", f"/contents/generations/tasks/{task_id}")
@@ -187,26 +301,13 @@ def _poll_task(task_id: str) -> str:
             raise RuntimeError(f"Ark task {task_id} failed: {msg or 'unknown error'}")
         if time.monotonic() >= deadline:
             raise RuntimeError(
-                f"Ark task {task_id} did not finish within "
-                f"{int(_poll_timeout())}s (last status: {status})"
+                f"Ark task {task_id} did not finish within {int(_poll_timeout())}s (last status: {status})"
             )
         time.sleep(POLL_INTERVAL_S)
 
 
-def _download(url: str) -> bytes:
-    """Download the produced mp4 (Ark video URLs are valid for ~24h only)."""
-    log.info("downloading result video")
-    try:
-        resp = urlopen(url, timeout=180)  # noqa: S310
-    except HTTPError as e:
-        raise RuntimeError(f"HTTP {e.code} downloading video: {e.reason}") from e
-    except URLError as e:
-        raise RuntimeError(f"Network error downloading video: {e.reason}") from e
-    return resp.read()
-
-
-def _generate(content: List[Dict[str, Any]], **top_params: Any) -> Asset:
-    task_id = _create_task(content, **top_params)
+def _generate_video(model: str, content: List[Dict[str, Any]], **top_params: Any) -> Asset:
+    task_id = _create_task(model, content, **top_params)
     video_url = _poll_task(task_id)
     return asset(_download(video_url), mime="video/mp4")
 
@@ -217,7 +318,168 @@ def _duration_seconds(value: float | None) -> int | None:
     return int(math.floor(value))
 
 
-# ── ABI slot handlers ──────────────────────────────────────────────────────
+# ── Text slots ──────────────────────────────────────────────────────────────
+
+
+@node_slot(NodeSlots.GEN_TEXT)
+def gen_text(input: GenTextInput) -> GenTextOutput:
+    user_message = (
+        f"{input.userPrompt or ''}\n\nUser input: {input.text}\n\n"
+        "Note: output only the requested answer. Do not include any other content."
+    )
+    answer = _chat_text(model=_active_model("gen-text", _env("DOUBAO_MODEL")), user_message=user_message)
+    return GenTextOutput(success=True, text=answer)
+
+
+def _parse_split_texts(raw: str) -> list[str]:
+    s = raw.strip()
+    if s.startswith("```"):
+        s = s.strip("`")
+        if "\n" in s:
+            _, _, s = s.partition("\n")
+        s = s.strip()
+        if s.endswith("```"):
+            s = s[:-3].strip()
+    obj = json.loads(s)
+    if isinstance(obj, list):
+        items = obj
+    elif isinstance(obj, dict):
+        raw_items = obj.get("texts")
+        items = raw_items if isinstance(raw_items, list) else None
+    else:
+        items = None
+    if items is None or not all(isinstance(x, str) for x in items):
+        raise ValueError("LLM did not return a JSON array of strings")
+    cleaned = [x.strip() for x in items if x.strip()]
+    if not cleaned:
+        raise ValueError("LLM returned an empty split")
+    return cleaned
+
+
+@node_slot(NodeSlots.SPLIT_TEXT)
+def split_text(input: SplitTextInput) -> SplitTextOutput:
+    instruction = (input.userPrompt or "").strip() or "Split into natural, coherent segments."
+    user_message = (
+        f"Split the following text into multiple segments according to this instruction:\n{instruction}\n\n"
+        'Return ONLY a JSON object of the form {"texts": ["segment 1", "segment 2", ...]} — no prose, no markdown. '
+        f"Preserve the original wording; do not summarize.\n\nTEXT:\n{input.text}"
+    )
+    raw = _chat_text(
+        model=_active_model("split-text", _env("DOUBAO_MODEL")), user_message=user_message, json_mode=True
+    )
+    try:
+        texts = _parse_split_texts(raw)
+    except (ValueError, json.JSONDecodeError) as e:
+        return SplitTextOutput(success=False, error=str(e))
+    return SplitTextOutput(success=True, texts=texts)
+
+
+@node_slot(NodeSlots.COMBINE_TEXT)
+def combine_text(input: CombineTextInput) -> CombineTextOutput:
+    joined = "\n\n".join(input.texts)
+    user_message = (
+        f"{input.userPrompt or ''}\n\nUser input: {joined}\n\n"
+        "Note: output only the requested answer. Do not include any other content."
+    )
+    answer = _chat_text(model=_active_model("combine-text", _env("DOUBAO_MODEL")), user_message=user_message)
+    return CombineTextOutput(success=True, text=answer)
+
+
+# ── Vision → text slots ─────────────────────────────────────────────────────
+
+
+@node_slot(NodeSlots.IMAGE_GEN_TEXT)
+def image_gen_text(input: ImageGenTextInput) -> ImageGenTextOutput:
+    content: List[Dict[str, Any]] = [{"type": "text", "text": input.text}]
+    if input.image is not None:
+        content.append({"type": "image_url", "image_url": {"url": _data_url(input.image, default_mime="image/png")}})
+    messages: List[Dict[str, Any]] = []
+    if input.system:
+        messages.append({"role": "system", "content": input.system})
+    messages.append({"role": "user", "content": content})
+    text = _chat(model=_active_model("image-gen-text", _env("DOUBAO_VISION_MODEL")), messages=messages)
+    return ImageGenTextOutput(success=True, text=text)
+
+
+@node_slot(NodeSlots.IMAGE_DESCRIBE)
+def image_describe(input: ImageDescribeInput) -> ImageDescribeOutput:
+    instruction = (input.userPrompt or "").strip() or (input.text or "").strip() or "Describe this image in detail."
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": instruction},
+                {"type": "image_url", "image_url": {"url": _data_url(input.image, default_mime="image/png")}},
+            ],
+        }
+    ]
+    text = _chat(model=_active_model("image-describe", _env("DOUBAO_VISION_MODEL")), messages=messages)
+    return ImageDescribeOutput(success=True, text=text)
+
+
+@node_slot(NodeSlots.VIDEO_GEN_TEXT)
+def video_gen_text(input: VideoGenTextInput) -> VideoGenTextOutput:
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": input.text},
+                {"type": "video_url", "video_url": {"url": _data_url(input.video, default_mime="video/mp4")}},
+            ],
+        }
+    ]
+    text = _chat(model=_active_model("video-gen-text", _env("DOUBAO_VISION_MODEL")), messages=messages)
+    return VideoGenTextOutput(success=True, text=text)
+
+
+@node_slot(NodeSlots.VIDEO_DESCRIBE)
+def video_describe(input: VideoDescribeInput) -> VideoDescribeOutput:
+    instruction = (input.text or "").strip() or "Describe this video in detail."
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": instruction},
+                {"type": "video_url", "video_url": {"url": _data_url(input.video, default_mime="video/mp4")}},
+            ],
+        }
+    ]
+    text = _chat(model=_active_model("video-describe", _env("DOUBAO_VISION_MODEL")), messages=messages)
+    return VideoDescribeOutput(success=True, text=text)
+
+
+# ── Seedream image slots ────────────────────────────────────────────────────
+
+
+@node_slot(NodeSlots.IMAGE_GEN)
+def image_gen(input: ImageGenInput) -> ImageGenOutput:
+    prompt = (input.text or "").strip()
+    if not prompt:
+        return ImageGenOutput(success=False, error="image-gen requires a text prompt")
+    image = _generate_image(model=_active_model("image-gen", _env("SEEDREAM_MODEL")), prompt=prompt, images=[])
+    return ImageGenOutput(success=True, image=image)
+
+
+@node_slot(NodeSlots.IMAGE_EDIT)
+def image_edit(input: ImageEditInput) -> ImageEditOutput:
+    image = _generate_image(
+        model=_active_model("image-edit", _env("SEEDREAM_MODEL")), prompt=input.text, images=[input.image]
+    )
+    return ImageEditOutput(success=True, image=image)
+
+
+@node_slot(NodeSlots.IMAGE_FUSION)
+def image_fusion(input: ImageFusionInput) -> ImageFusionOutput:
+    images = list(input.images or [])
+    if not images:
+        return ImageFusionOutput(success=False, error="image-fusion requires at least one input image")
+    image = _generate_image(
+        model=_active_model("image-fusion", _env("SEEDREAM_MODEL")), prompt=input.text, images=images
+    )
+    return ImageFusionOutput(success=True, image=image)
+
+
+# ── Seedance video slots ────────────────────────────────────────────────────
 
 
 @node_slot(NodeSlots.TEXT_GEN_VIDEO)
@@ -225,9 +487,9 @@ def text_gen_video(input: TextGenVideoInput) -> TextGenVideoOutput:
     text = (input.text or "").strip()
     if not text:
         return TextGenVideoOutput(success=False, error="Missing text prompt")
-    content = [{"type": "text", "text": text}]
-    video = _generate(
-        content,
+    video = _generate_video(
+        _active_model("text-gen-video", _env("SEEDANCE_MODEL")),
+        [{"type": "text", "text": text}],
         ratio=_ratio_from_wh(input.width, input.height),
         duration=_duration_seconds(input.duration),
     )
@@ -241,13 +503,10 @@ def image_gen_video(input: ImageGenVideoInput) -> ImageGenVideoOutput:
         return ImageGenVideoOutput(success=False, error="Missing text prompt")
     content = [
         {"type": "text", "text": text},
-        {
-            "type": "image_url",
-            "image_url": {"url": _data_url(input.image, default_mime="image/png")},
-            "role": "first_frame",
-        },
+        {"type": "image_url", "image_url": {"url": _data_url(input.image, default_mime="image/png")}, "role": "first_frame"},
     ]
-    video = _generate(
+    video = _generate_video(
+        _active_model("image-gen-video", _env("SEEDANCE_MODEL")),
         content,
         ratio=_ratio_from_wh(input.width, input.height),
         duration=_duration_seconds(input.duration),
@@ -262,18 +521,11 @@ def image_image_gen_video(input: ImageImageGenVideoInput) -> ImageImageGenVideoO
         return ImageImageGenVideoOutput(success=False, error="Missing text prompt")
     content = [
         {"type": "text", "text": text},
-        {
-            "type": "image_url",
-            "image_url": {"url": _data_url(input.image, default_mime="image/png")},
-            "role": "first_frame",
-        },
-        {
-            "type": "image_url",
-            "image_url": {"url": _data_url(input.end_image, default_mime="image/png")},
-            "role": "last_frame",
-        },
+        {"type": "image_url", "image_url": {"url": _data_url(input.image, default_mime="image/png")}, "role": "first_frame"},
+        {"type": "image_url", "image_url": {"url": _data_url(input.end_image, default_mime="image/png")}, "role": "last_frame"},
     ]
-    video = _generate(
+    video = _generate_video(
+        _active_model("image-image-gen-video", _env("SEEDANCE_MODEL")),
         content,
         ratio=_ratio_from_wh(input.width, input.height),
         duration=_duration_seconds(input.duration),
@@ -288,41 +540,31 @@ def audio_image_gen_video(input: AudioImageGenVideoInput) -> AudioImageGenVideoO
     if text:
         content.append({"type": "text", "text": text})
     content.append(
-        {
-            "type": "image_url",
-            "image_url": {"url": _data_url(input.image, default_mime="image/png")},
-            "role": "reference_image",
-        }
+        {"type": "image_url", "image_url": {"url": _data_url(input.image, default_mime="image/png")}, "role": "reference_image"}
     )
     content.append(
-        {
-            "type": "audio_url",
-            "audio_url": {"url": _data_url(input.audio, default_mime="audio/mpeg")},
-            "role": "reference_audio",
-        }
+        {"type": "audio_url", "audio_url": {"url": _data_url(input.audio, default_mime="audio/mpeg")}, "role": "reference_audio"}
     )
-    # No ABI duration field here — let the model pick (audio total must be <= 15s).
-    video = _generate(content, ratio=_ratio_from_wh(input.width, input.height))
+    video = _generate_video(
+        _active_model("audio-image-gen-video", _env("SEEDANCE_MODEL")),
+        content,
+        ratio=_ratio_from_wh(input.width, input.height),
+    )
     return AudioImageGenVideoOutput(success=True, video=video)
 
 
 @node_slot(NodeSlots.IMAGES_GEN_VIDEO)
 def images_gen_video(input: ImagesGenVideoInput) -> ImagesGenVideoOutput:
-    # Free multi-image reference fusion: every image is a Seedance multimodal
-    # reference (role=reference_image), combined with the text into a new video.
     text = (input.text or "").strip()
     if not text:
         return ImagesGenVideoOutput(success=False, error="Missing text prompt")
     content: List[Dict[str, Any]] = [{"type": "text", "text": text}]
     for img in input.images or []:
         content.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": _data_url(img, default_mime="image/png")},
-                "role": "reference_image",
-            }
+            {"type": "image_url", "image_url": {"url": _data_url(img, default_mime="image/png")}, "role": "reference_image"}
         )
-    video = _generate(
+    video = _generate_video(
+        _active_model("images-gen-video", _env("SEEDANCE_MODEL")),
         content,
         ratio=_ratio_from_wh(input.width, input.height),
         duration=_duration_seconds(input.duration),
@@ -330,15 +572,42 @@ def images_gen_video(input: ImagesGenVideoInput) -> ImagesGenVideoOutput:
     return ImagesGenVideoOutput(success=True, video=video)
 
 
+# ── Deterministic batch slots (no model) ────────────────────────────────────
+
+
+@node_slot(NodeSlots.DROP_VIDEO)
+def drop_video(input: DropVideoInput) -> DropVideoOutput:
+    result = drop_video_output(input.model_dump())
+    return DropVideoOutput.model_construct(**result)
+
+
+@node_slot(NodeSlots.ARRANGE_GROUP)
+def arrange_group(input: ArrangeGroupInput) -> ArrangeGroupOutput:
+    result = arrange_group_output(input.model_dump())
+    return ArrangeGroupOutput.model_construct(**result)
+
+
 # Runtime dispatcher. The @node_slot wrapper accepts a raw dict here (it
 # deep-constructs the typed BaseModel internally) and dumps the BaseModel
 # return to a dict. `Any` reflects the I/O boundary, not the plugin contract.
 _SLOT_HANDLERS: Dict[str, Any] = {
+    NodeSlots.GEN_TEXT: gen_text,
+    NodeSlots.SPLIT_TEXT: split_text,
+    NodeSlots.COMBINE_TEXT: combine_text,
+    NodeSlots.IMAGE_GEN_TEXT: image_gen_text,
+    NodeSlots.IMAGE_DESCRIBE: image_describe,
+    NodeSlots.VIDEO_GEN_TEXT: video_gen_text,
+    NodeSlots.VIDEO_DESCRIBE: video_describe,
+    NodeSlots.IMAGE_GEN: image_gen,
+    NodeSlots.IMAGE_EDIT: image_edit,
+    NodeSlots.IMAGE_FUSION: image_fusion,
     NodeSlots.TEXT_GEN_VIDEO: text_gen_video,
     NodeSlots.IMAGE_GEN_VIDEO: image_gen_video,
     NodeSlots.IMAGE_IMAGE_GEN_VIDEO: image_image_gen_video,
     NodeSlots.AUDIO_IMAGE_GEN_VIDEO: audio_image_gen_video,
     NodeSlots.IMAGES_GEN_VIDEO: images_gen_video,
+    NodeSlots.DROP_VIDEO: drop_video,
+    NodeSlots.ARRANGE_GROUP: arrange_group,
 }
 
 
@@ -348,6 +617,7 @@ def _write(out: Dict[str, Any]) -> None:
 
 
 def main() -> int:
+    global _REQUEST_MODEL
     try:
         raw = sys.stdin.read()
         req = json.loads(raw) if raw.strip() else {}
@@ -355,6 +625,7 @@ def main() -> int:
         if not isinstance(prompt, dict):
             prompt = {}
         slot = str(req.get("nodeSlot") or "") if isinstance(req, dict) else ""
+        _REQUEST_MODEL = str(req.get("model") or "").strip() if isinstance(req, dict) else ""
 
         handler = _SLOT_HANDLERS.get(slot)
         if handler is None:

@@ -38,6 +38,10 @@ from tongflow.models.images_gen_video import (
     ImagesGenVideoInput,
     ImagesGenVideoOutput,
 )
+from tongflow.models.refs_gen_video import (
+    RefsGenVideoInput,
+    RefsGenVideoOutput,
+)
 from tongflow.models.drop_video import DropVideoInput, DropVideoOutput
 from tongflow.models.arrange_group import ArrangeGroupInput, ArrangeGroupOutput
 from tongflow.llm_batch_handlers import arrange_group_output, drop_video_output
@@ -70,6 +74,7 @@ TONGFLOW_SLOT_MODELS = {
     "image-image-gen-video": ["doubao-seedance-2-0-mini-260615", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"],
     "audio-image-gen-video": ["doubao-seedance-2-0-mini-260615", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"],
     "images-gen-video": ["doubao-seedance-2-0-mini-260615", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"],
+    "refs-gen-video": ["doubao-seedance-2-0-mini-260615", "doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"],
 }
 
 # Slots this plugin is the default implementation of.
@@ -571,6 +576,48 @@ def images_gen_video(input: ImagesGenVideoInput) -> ImagesGenVideoOutput:
     return ImagesGenVideoOutput(success=True, video=video)
 
 
+@node_slot(NodeSlots.REFS_GEN_VIDEO)
+def refs_gen_video(input: RefsGenVideoInput) -> RefsGenVideoOutput:
+    text = (input.text or "").strip()
+    if not text:
+        return RefsGenVideoOutput(success=False, error="Missing text prompt")
+    images = input.images or []
+    videos = input.videos or []
+    audios = input.audios or []
+    # Ark constraint mirrors the ABI contract: audio can never be the sole
+    # reference, and the caps are 9 images / 3 videos / 3 audio clips.
+    if not images and not videos:
+        return RefsGenVideoOutput(
+            success=False,
+            error="At least one reference image or video is required; audio cannot be the only reference",
+        )
+    if len(images) > 9 or len(videos) > 3 or len(audios) > 3 or len(images) + len(videos) + len(audios) > 12:
+        return RefsGenVideoOutput(
+            success=False,
+            error="Too many references: up to 9 images, 3 videos and 3 audio clips (12 files total)",
+        )
+    content: List[Dict[str, Any]] = [{"type": "text", "text": text}]
+    for img in images:
+        content.append(
+            {"type": "image_url", "image_url": {"url": _data_url(img, default_mime="image/png")}, "role": "reference_image"}
+        )
+    for vid in videos:
+        content.append(
+            {"type": "video_url", "video_url": {"url": _data_url(vid, default_mime="video/mp4")}, "role": "reference_video"}
+        )
+    for aud in audios:
+        content.append(
+            {"type": "audio_url", "audio_url": {"url": _data_url(aud, default_mime="audio/mpeg")}, "role": "reference_audio"}
+        )
+    video = _generate_video(
+        _active_model("refs-gen-video", _env("SEEDANCE_MODEL")),
+        content,
+        ratio=_ratio_from_wh(input.width, input.height),
+        duration=_duration_seconds(input.duration),
+    )
+    return RefsGenVideoOutput(success=True, video=video)
+
+
 # ── Deterministic batch slots (no model) ────────────────────────────────────
 
 
@@ -605,6 +652,7 @@ _SLOT_HANDLERS: Dict[str, Any] = {
     NodeSlots.IMAGE_IMAGE_GEN_VIDEO: image_image_gen_video,
     NodeSlots.AUDIO_IMAGE_GEN_VIDEO: audio_image_gen_video,
     NodeSlots.IMAGES_GEN_VIDEO: images_gen_video,
+    NodeSlots.REFS_GEN_VIDEO: refs_gen_video,
     NodeSlots.DROP_VIDEO: drop_video,
     NodeSlots.ARRANGE_GROUP: arrange_group,
 }

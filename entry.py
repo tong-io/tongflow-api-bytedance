@@ -13,7 +13,86 @@ from urllib.request import Request, urlopen
 
 from tongflow.node_slots import NodeSlots
 from tongflow.protocol import Asset, asset
-from tongflow.slots import node_slot
+from tongflow.slots import current_params, node_slot
+
+
+def _adv(name: str, default):
+    """Advanced-section override (``TONGFLOW_SLOT_PARAMS``) or the plugin default."""
+    v = current_params().get(name)
+    if v is None:
+        return default
+    if isinstance(default, bool):
+        return bool(v)
+    if isinstance(default, int):
+        return int(v)
+    if isinstance(default, float):
+        return float(v)
+    return v
+
+# Per-run knobs offered under the node's collapsed "Advanced" section.
+# Pure literal (the platform scanner reads it by AST, never imports this
+# module). Values reach the handlers via current_params(); an untouched
+# control is absent there and falls back to the plugin default.
+TONGFLOW_SLOT_PARAMS = {
+    "gen-text": {
+        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+    },
+    "split-text": {
+        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+    },
+    "combine-text": {
+        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+    },
+    "image-describe": {
+        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+    },
+    "image-gen-text": {
+        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+    },
+    "video-describe": {
+        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+    },
+    "video-gen-text": {
+        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+    },
+    "text-gen-video": {
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
+        "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
+    },
+    "image-gen-video": {
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
+        "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
+    },
+    "image-image-gen-video": {
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
+        "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
+    },
+    "audio-image-gen-video": {
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
+        "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
+    },
+    "images-gen-video": {
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
+        "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
+    },
+    "refs-gen-video": {
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
+        "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
+    },
+}
 from tongflow.models.gen_text import GenTextInput, GenTextOutput
 from tongflow.models.split_text import SplitTextInput, SplitTextOutput
 from tongflow.models.combine_text import CombineTextInput, CombineTextOutput
@@ -218,6 +297,10 @@ def _download(url: str) -> bytes:
 
 def _chat(*, model: str, messages: List[Dict[str, Any]], json_mode: bool = False) -> str:
     body: Dict[str, Any] = {"model": model, "messages": messages}
+    if current_params().get("temperature") is not None:
+        body["temperature"] = float(current_params()["temperature"])
+    if current_params().get("thinking"):
+        body["thinking"] = {"type": str(current_params()["thinking"])}
     if json_mode:
         body["response_format"] = {"type": "json_object"}
     obj = _request("POST", "/chat/completions", body)
@@ -275,9 +358,9 @@ def _create_task(model: str, content: List[Dict[str, Any]], **top_params: Any) -
     body: Dict[str, Any] = {
         "model": model,
         "content": content,
-        "generate_audio": _env_bool("SEEDANCE_GENERATE_AUDIO", True),
-        "resolution": _resolution(),
-        "watermark": _env_bool("SEEDANCE_WATERMARK", False),
+        "generate_audio": _adv("generate_audio", _env_bool("SEEDANCE_GENERATE_AUDIO", True)),
+        "resolution": str(current_params().get("resolution") or "") or _resolution(),
+        "watermark": _adv("watermark", _env_bool("SEEDANCE_WATERMARK", False)),
     }
     for key, val in top_params.items():
         if val is not None:

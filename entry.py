@@ -35,60 +35,60 @@ def _adv(name: str, default):
 # control is absent there and falls back to the plugin default.
 TONGFLOW_SLOT_PARAMS = {
     "gen-text": {
-        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
-        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+        "temperature": {"type": "number", "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["auto", "enabled", "disabled"], "default": "auto", "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
     },
     "split-text": {
-        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
-        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+        "temperature": {"type": "number", "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["auto", "enabled", "disabled"], "default": "auto", "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
     },
     "combine-text": {
-        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
-        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+        "temperature": {"type": "number", "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["auto", "enabled", "disabled"], "default": "auto", "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
     },
     "image-describe": {
-        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
-        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+        "temperature": {"type": "number", "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["auto", "enabled", "disabled"], "default": "auto", "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
     },
     "image-gen-text": {
-        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
-        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+        "temperature": {"type": "number", "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["auto", "enabled", "disabled"], "default": "auto", "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
     },
     "video-describe": {
-        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
-        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+        "temperature": {"type": "number", "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["auto", "enabled", "disabled"], "default": "auto", "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
     },
     "video-gen-text": {
-        "temperature": {"type": "number", "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
-        "thinking": {"type": "select", "options": ["enabled", "disabled", "auto"], "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
+        "temperature": {"type": "number", "default": 1.0, "min": 0.0, "max": 2.0, "step": 0.1, "label": "Temperature"},
+        "thinking": {"type": "select", "options": ["auto", "enabled", "disabled"], "default": "auto", "label": "Deep thinking", "description": "Doubao Seed 1.6+ models."},
     },
     "text-gen-video": {
-        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "default": "720p", "label": "Resolution"},
         "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
         "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
     },
     "image-gen-video": {
-        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "default": "720p", "label": "Resolution"},
         "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
         "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
     },
     "image-image-gen-video": {
-        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "default": "720p", "label": "Resolution"},
         "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
         "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
     },
     "audio-image-gen-video": {
-        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "default": "720p", "label": "Resolution"},
         "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
         "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
     },
     "images-gen-video": {
-        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "default": "720p", "label": "Resolution"},
         "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
         "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
     },
     "refs-gen-video": {
-        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "label": "Resolution"},
+        "resolution": {"type": "select", "options": ["480p", "720p", "1080p"], "default": "720p", "label": "Resolution"},
         "generate_audio": {"type": "boolean", "default": True, "label": "Generate audio"},
         "watermark": {"type": "boolean", "default": False, "label": "Watermark"},
     },
